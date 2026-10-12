@@ -1,0 +1,140 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Ozone Prediction Slides</title>
+<style>
+  @page { size: 13.333in 7.5in; margin: 0; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Helvetica Neue", Arial, sans-serif; color: #1b1b1b; background: #fff; }
+  .slide { width: 13.333in; height: 7.5in; padding: 0.6in 0.8in; page-break-after: always; position: relative; overflow: hidden; }
+  .slide:last-child { page-break-after: auto; }
+  h1 { font-size: 40pt; margin: 1.6in 0 0.2in; color: #1f4e79; }
+  h2 { font-size: 28pt; margin: 0 0 0.3in; color: #1f4e79; border-bottom: 3px solid #2a78d6; padding-bottom: 8px; }
+  p, li { font-size: 19pt; line-height: 1.45; }
+  ul { margin: 0; padding-left: 0.4in; }
+  .muted { color: #52514e; font-size: 18pt; }
+  table { border-collapse: collapse; font-size: 17pt; margin-top: 0.1in; }
+  th, td { border: 1px solid #bbb; padding: 7px 18px; text-align: center; }
+  th { background: #e8eef5; }
+  td:first-child { text-align: left; }
+  img { display: block; margin: 0 auto; }
+  .two { display: flex; gap: 0.4in; align-items: center; }
+  .two > * { flex: 1; min-width: 0; }
+  .two > table { flex: none; }
+  pre { background: #f3f3f1; padding: 14px 18px; font-size: 15pt; border-radius: 6px; }
+  .num { position: absolute; bottom: 0.3in; right: 0.5in; color: #888; font-size: 12pt; }
+</style>
+</head>
+<body>
+
+<div class="slide">
+  <h1>Predicting Tropospheric Ozone</h1>
+  <p class="muted">Replicating "CS229 Autumn 2019: Predicting Tropospheric Ozone" (M. Sutton)</p>
+  <p class="muted">UE24CS352A Machine Learning &middot; Mini-Project</p>
+</div>
+
+<div class="slide">
+  <h2>Problem</h2>
+  <ul>
+    <li>Ground-level ozone is a pollutant formed from NO<sub>x</sub> + VOCs + sunlight</li>
+    <li>EPA flags regions above the limit as "nonattainment", which triggers costly regulation</li>
+    <li>Goal: predict a site's daily ozone (ppm) from
+      <b>temperature, pressure, wind, month, location, NO<sub>2</sub>, VOC</b></li>
+    <li>Regression problem, evaluated with R<sup>2</sup> like the paper</li>
+  </ul>
+  <div class="num">2</div>
+</div>
+
+<div class="slide">
+  <h2>Dataset</h2>
+  <ul>
+    <li>EPA Historical Air Quality (same data as the paper's BigQuery tables), 1980&ndash;2017</li>
+    <li>6 daily files per year: ozone, NO<sub>2</sub>, VOCs, temperature, pressure, wind &rarr; ~600 MB</li>
+    <li>Average per (site, day), then inner join &rarr; <b>90,997 rows, 86 sites</b></li>
+    <li>Time split: train 1980&ndash;2016 (86,461) &middot; val Jan&ndash;Jun 2017 (2,384) &middot; test Jul&ndash;Dec 2017 (2,152)</li>
+    <li>Min-max scaling fitted on training data only</li>
+  </ul>
+  <div class="num">3</div>
+</div>
+
+<div class="slide">
+  <h2>Pipeline</h2>
+  <pre>download.py  &rarr;  build_dataset.py  &rarr;  train.py  &rarr;  evaluate.py  &rarr;  predict.py
+ EPA zips        clean + join          5 models       plots +          demo
+                 data/ozone.csv        metrics.csv    importance</pre>
+  <ul>
+    <li>Python, pandas, scikit-learn, matplotlib</li>
+    <li>Whole pipeline runs on a laptop in a few minutes after download</li>
+  </ul>
+  <div class="num">4</div>
+</div>
+
+<div class="slide">
+  <h2>Models</h2>
+  <ul>
+    <li><b>Linear Regression</b>: baseline</li>
+    <li><b>SVR (paper)</b>: polynomial kernel, &epsilon; = 0.1</li>
+    <li><b>SVR (fixed)</b>: RBF kernel, &epsilon; = 0.002, because ozone is ~0.03 ppm so &epsilon; = 0.1 ignores all errors</li>
+    <li><b>Neural Network</b>: 3 &times; 200 ReLU, adaptive learning rate (paper's best)</li>
+    <li><b>Gradient Boosting</b> (our addition): fast, strong on tabular data</li>
+  </ul>
+  <div class="num">5</div>
+</div>
+
+<div class="slide">
+  <h2>Results: test R<sup>2</sup> (Jul&ndash;Dec 2017)</h2>
+  <div class="two">
+    <table>
+      <tr><th>Model</th><th>Paper</th><th>Ours</th></tr>
+      <tr><td>Linear Regression</td><td>0.467</td><td>0.412</td></tr>
+      <tr><td>SVR (&epsilon;=0.1)</td><td>&minus;2.363</td><td>&minus;2.508</td></tr>
+      <tr><td>SVR (&epsilon;=0.002)</td><td>&ndash;</td><td>0.612</td></tr>
+      <tr><td>Neural Network</td><td>0.654</td><td>0.555</td></tr>
+      <tr><td><b>Gradient Boosting</b></td><td>&ndash;</td><td><b>0.649</b></td></tr>
+    </table>
+    <img src="../results/r2_test.png" style="width:100%">
+  </div>
+  <div class="num">6</div>
+</div>
+
+<div class="slide">
+  <h2>True vs predicted (validation set)</h2>
+  <img src="../results/pred_vs_true.png" style="width:100%; margin-top:0.4in">
+  <p class="muted" style="margin-top:0.4in">The paper-setting SVR predicts a constant (flat line), which is why its R<sup>2</sup> is negative.</p>
+  <div class="num">7</div>
+</div>
+
+<div class="slide">
+  <h2>Which features matter?</h2>
+  <div class="two">
+    <img src="../results/feature_importance.png" style="width:100%">
+    <ul>
+      <li>Temperature dominates (proxy for sunlight)</li>
+      <li>Location next: sites differ a lot</li>
+      <li>NO<sub>2</sub> and VOC add less once weather and location are known</li>
+    </ul>
+  </div>
+  <div class="num">8</div>
+</div>
+
+<div class="slide">
+  <h2>Conclusions</h2>
+  <ul>
+    <li>Paper's findings replicate: linear underfits, &epsilon; = 0.1 SVR fails, non-linear models reach R<sup>2</sup> &asymp; 0.6&ndash;0.65</li>
+    <li>Fixing SVR's &epsilon; or using gradient boosting matches or beats the paper's neural network, with far less training time</li>
+    <li>Future work: previous-day ozone, traffic/industry data, predicting the EPA ozone class directly</li>
+  </ul>
+  <div class="num">9</div>
+</div>
+
+<div class="slide">
+  <h2>Live demo</h2>
+  <pre>python predict.py --temperature 85 --pressure 1010 --wind 4 --month 7 \
+    --lat 34.05 --lon -118.24 --no2 15 --voc 60</pre>
+  <p class="muted">Thank you. Questions?</p>
+  <div class="num">10</div>
+</div>
+
+</body>
+</html>

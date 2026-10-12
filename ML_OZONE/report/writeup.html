@@ -1,0 +1,115 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Ozone Prediction Write-up</title>
+<style>
+  @page { size: A4; margin: 16mm 17mm; }
+  body { font-family: "Times New Roman", serif; font-size: 10.5pt; line-height: 1.35; color: #111; background: #fff; }
+  h1 { font-size: 15pt; text-align: center; margin: 0 0 2px; }
+  .sub { text-align: center; font-size: 10pt; margin-bottom: 10px; color: #333; }
+  h2 { font-size: 11.5pt; margin: 10px 0 3px; color: #1f4e79; }
+  p { margin: 3px 0 5px; text-align: justify; }
+  ul { margin: 2px 0 5px 18px; padding: 0; }
+  li { margin-bottom: 2px; }
+  table { border-collapse: collapse; margin: 5px auto; font-size: 9.5pt; }
+  th, td { border: 1px solid #999; padding: 2px 8px; text-align: center; }
+  th { background: #e8eef5; }
+  td:first-child { text-align: left; }
+  .figs { display: flex; gap: 8px; align-items: flex-start; margin: 6px 0; }
+  .figs img { width: 50%; }
+  img.wide { width: 100%; margin-top: 4px; }
+  .cap { font-size: 8.5pt; text-align: center; color: #333; margin: 0 0 4px; }
+</style>
+</head>
+<body>
+<h1>Predicting Tropospheric Ozone Levels from Weather and Precursor Pollutants</h1>
+<div class="sub">UE24CS352A Machine Learning, Mini-Project &middot; Replication of Sutton, CS229 Autumn 2019</div>
+
+<h2>1. Problem Statement</h2>
+<p>Ground-level ozone is a harmful pollutant formed when NO<sub>x</sub> and volatile organic compounds (VOCs)
+react in sunlight. The US EPA designates regions that exceed the ozone standard as "nonattainment", which
+triggers costly regulation. Forecasting ozone lets a region act early. The task is a regression problem: given
+a day's <b>temperature, pressure, wind speed, month, location, NO<sub>2</sub> and VOC levels</b> at a monitoring
+site, predict that day's ozone concentration (ppm). We replicate the original paper, which compared linear
+regression, support vector regression (SVR) and a neural network, and then try simple improvements.</p>
+
+<h2>2. Dataset</h2>
+<p>The paper used the <i>EPA Historical Air Quality</i> dataset on Google BigQuery. We use the same source
+published as EPA AirData daily summary files (no cloud account needed), 1980&ndash;2017, about 600&nbsp;MB
+across six files per year: ozone (label), NO<sub>2</sub>, VOCs, temperature, pressure and wind.</p>
+<ul>
+  <li>Each file is averaged per <i>(site, date)</i>. For VOCs we average over all measured species, and for wind
+  we keep only wind speed. The six tables are inner-joined so each row is one site on one day with every feature
+  present. Latitude/longitude are used for location instead of the numeric site code.</li>
+  <li>Final dataset: <b>90,997 rows</b> from sites that measure all six quantities. Split by time as in the paper:
+  <b>train 1980&ndash;2016 (86,461)</b>, <b>validation Jan&ndash;Jun 2017 (2,384)</b>, <b>test Jul&ndash;Dec 2017
+  (2,152)</b>.</li>
+  <li>The paper reports about 2&times; more rows (200,652 train). We believe this is because the BigQuery tables
+  contain several rows per site-day (multiple monitors / ozone standards), which we merge into one.</li>
+  <li>Features are min-max scaled to [0,1] using statistics from the training set only.</li>
+</ul>
+
+<h2>3. Approach</h2>
+<ul>
+  <li><b>Linear Regression</b> (ordinary least squares), as the baseline.</li>
+  <li><b>SVR, paper setting:</b> polynomial kernel with sklearn's default &epsilon; = 0.1. Kernel SVR scales
+  roughly quadratically with data size, so all SVRs are trained on a random 20,000-row subset.</li>
+  <li><b>SVR, fixed:</b> the paper's own post-mortem says &epsilon; was too large. Ozone values are around
+  0.03&nbsp;ppm, so a 0.1&nbsp;ppm tube contains every point and the model learns nothing. We use
+  &epsilon; = 0.002 with an RBF kernel.</li>
+  <li><b>Neural Network:</b> MLP with 3 hidden layers of 200 ReLU units and an adaptive learning rate,
+  as in the paper, trained with Adam and early stopping.</li>
+  <li><b>Gradient Boosting</b> (our addition): sklearn's <code>HistGradientBoostingRegressor</code>, which is fast,
+  needs no scaling and works well on tabular data.</li>
+  <li>Models are compared with R<sup>2</sup> (as in the paper) and mean absolute error. Permutation feature
+  importance is used to answer the paper's "future work" question of which features matter most.</li>
+</ul>
+
+<h2>4. Implementation</h2>
+<p>Python with pandas, scikit-learn and matplotlib, organised as a small pipeline:
+<code>download.py</code> (parallel download of EPA zips) &rarr; <code>build_dataset.py</code> (cleaning, per-site-day
+aggregation, joins) &rarr; <code>train.py</code> (time-based split, scaling, training, metrics, saving models)
+&rarr; <code>evaluate.py</code> (plots, feature importance) &rarr; <code>predict.py</code> (single prediction plus the
+EPA AQI category, used for the live demo). The full pipeline runs in under 10 minutes on a laptop once the data
+is downloaded.</p>
+
+<h2>5. Results</h2>
+<table>
+  <tr><th rowspan="2">Model</th><th colspan="2">Paper R<sup>2</sup></th><th colspan="3">Our R<sup>2</sup></th><th rowspan="2">Test MAE (ppm)</th></tr>
+  <tr><th>Train</th><th>Test</th><th>Train</th><th>Val</th><th>Test</th></tr>
+  <tr><td>Linear Regression</td><td>0.489</td><td>0.467</td><td>0.339</td><td>0.204</td><td>0.412</td><td>0.0073</td></tr>
+  <tr><td>SVR (poly, &epsilon;=0.1)</td><td>&minus;0.319</td><td>&minus;2.363</td><td>&minus;1.702</td><td>&minus;2.115</td><td>&minus;2.508</td><td>0.0198</td></tr>
+  <tr><td>SVR (RBF, &epsilon;=0.002)</td><td>&ndash;</td><td>&ndash;</td><td>0.607</td><td>0.563</td><td>0.612</td><td>0.0059</td></tr>
+  <tr><td>Neural Network</td><td>0.702</td><td>0.654</td><td>0.601</td><td>0.519</td><td>0.555</td><td>0.0064</td></tr>
+  <tr><td><b>Gradient Boosting</b></td><td>&ndash;</td><td>&ndash;</td><td>0.708</td><td>0.577</td><td><b>0.649</b></td><td><b>0.0056</b></td></tr>
+</table>
+<img class="wide" src="../results/pred_vs_true.png">
+<p class="cap">Figure 1. True vs predicted ozone on the validation set (Jan&ndash;Jun 2017). The dashed line is a perfect prediction.</p>
+<div class="figs">
+  <img src="../results/r2_test.png">
+  <img src="../results/feature_importance.png">
+</div>
+<p class="cap">Figure 2. Left: test R<sup>2</sup> per model. Right: permutation importance for gradient boosting on the test set.</p>
+<p>The paper's ranking replicates. Linear regression is weak (R<sup>2</sup> &asymp; 0.4) because ozone depends
+non-linearly on its inputs. The paper-setting SVR outputs an almost constant value (the flat line in Figure 1) and
+scores a strongly negative R<sup>2</sup>, just like the paper's &minus;2.36. Lowering &epsilon; alone turns it
+into one of the best models (0.61). Our neural network scores 0.555, below the paper's 0.65, likely because our de-duplicated dataset is half the size and early stopping ends training after 20 epochs. Gradient boosting
+gives the best test R<sup>2</sup> (0.649) and MAE, needs no feature scaling, and trains in seconds rather than
+minutes. Temperature is by far the most important feature (a proxy for sunlight), followed by location; the
+precursors NO<sub>2</sub> and VOC matter less than expected once weather and location are known.</p>
+
+<h2>6. Conclusions</h2>
+<ul>
+  <li>We reproduced the paper's main findings using the same public EPA data: linear models underfit, an SVR
+  with too large an &epsilon; fails completely, and non-linear models reach R<sup>2</sup> &asymp; 0.6&ndash;0.65.</li>
+  <li>Two simple changes beat or match the paper's best model: tuning SVR's &epsilon; to the scale of the
+  target, and using gradient-boosted trees, which are cheaper and easier to train than a deep MLP.</li>
+  <li>Validation R<sup>2</sup> is lower than test R<sup>2</sup> for every model, because Jan&ndash;Jun has a smaller
+  spread of ozone values. Plain R<sup>2</sup> on a single six-month window is therefore a noisy measure.</li>
+  <li>Limitations / future work: only 86 sites (36 in 2017) measure every feature; adding sources such as nearby traffic or
+  industry (e.g. Census data), using the previous day's ozone, and predicting the EPA nonattainment class
+  directly as a classification problem.</li>
+</ul>
+</body>
+</html>
